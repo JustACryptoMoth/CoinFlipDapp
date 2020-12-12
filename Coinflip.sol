@@ -1,3 +1,4 @@
+
 pragma solidity 0.5.12;
 
 contract Coinflip {
@@ -8,5 +9,9 @@ contract Coinflip {
   }
   function setMessage(string memory newMessage) public payable {
     message = newMessage;
+  }
+
+  function random() public view returns (unit) {
+    return now % 2;
   }
 }
