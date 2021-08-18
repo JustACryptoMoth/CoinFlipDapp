@@ -3,13 +3,12 @@
   "title": "State",
   "type": "object",
   "required": [
-    "count",
+    "native_coin",
     "owner"
   ],
   "properties": {
-    "count": {
-      "type": "integer",
-      "format": "int32"
+    "native_coin": {
+      "type": "string"
     },
     "owner": {
       "$ref": "#/definitions/Addr"

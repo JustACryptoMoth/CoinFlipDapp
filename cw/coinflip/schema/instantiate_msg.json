@@ -3,12 +3,11 @@
   "title": "InstantiateMsg",
   "type": "object",
   "required": [
-    "count"
+    "native_coin"
   ],
   "properties": {
-    "count": {
-      "type": "integer",
-      "format": "int32"
+    "native_coin": {
+      "type": "string"
     }
   }
 }
