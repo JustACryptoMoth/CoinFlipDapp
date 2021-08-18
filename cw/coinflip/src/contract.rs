@@ -1,9 +1,7 @@
-use cosmwasm_std::{
-    entry_point, to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult,
-};
+use cosmwasm_std::{entry_point, DepsMut, Env, MessageInfo, Response, CosmosMsg, BankMsg, Coin, Uint128, attr};
 
 use crate::error::ContractError;
-use crate::msg::{CountResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
+use crate::msg::{ExecuteMsg, InstantiateMsg};
 use crate::state::{State, STATE};
 
 // Note, you can use StdResult in some functions where you do not
@@ -16,8 +14,8 @@ pub fn instantiate(
     msg: InstantiateMsg,
 ) -> Result<Response, ContractError> {
     let state = State {
-        count: msg.count,
         owner: info.sender,
+        native_coin: msg.native_coin,
     };
     STATE.save(deps.storage, &state)?;
 
@@ -28,115 +26,80 @@ pub fn instantiate(
 #[entry_point]
 pub fn execute(
     deps: DepsMut,
-    _env: Env,
+    env: Env,
     info: MessageInfo,
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match msg {
-        ExecuteMsg::Increment {} => try_increment(deps),
-        ExecuteMsg::Reset { count } => try_reset(deps, info, count),
+        ExecuteMsg::Flip { value } => try_flip(deps, env, info, value),
+        ExecuteMsg::Withdraw { amount } => try_withdraw(deps, info, amount),
     }
 }
 
-pub fn try_increment(deps: DepsMut) -> Result<Response, ContractError> {
-    STATE.update(deps.storage, |mut state| -> Result<_, ContractError> {
-        state.count += 1;
-        Ok(state)
-    })?;
-
-    Ok(Response::default())
-}
-
-pub fn try_reset(deps: DepsMut, info: MessageInfo, count: i32) -> Result<Response, ContractError> {
-    STATE.update(deps.storage, |mut state| -> Result<_, ContractError> {
-        if info.sender != state.owner {
-            return Err(ContractError::Unauthorized {});
-        }
-        state.count = count;
-        Ok(state)
-    })?;
-    Ok(Response::default())
-}
-
-#[entry_point]
-pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
-    match msg {
-        QueryMsg::GetCount {} => to_binary(&query_count(deps)?),
-    }
-}
-
-fn query_count(deps: Deps) -> StdResult<CountResponse> {
+pub fn try_flip(deps: DepsMut, env: Env, info: MessageInfo, value: bool) -> Result<Response, ContractError> {
     let state = STATE.load(deps.storage)?;
-    Ok(CountResponse { count: state.count })
+    let bet = info
+        .funds
+        .iter()
+        .find(|x| x.denom == state.native_coin)
+        .ok_or(ContractError::EmptyBalance {
+            coin: state.native_coin.clone(),
+        })?;
+
+    let random = random(env.block.time.nanos());
+
+    let response = if random == 0 && value || random == 1 && value == false {
+        let bank_send = CosmosMsg::Bank(BankMsg::Send {
+            to_address: info.sender.clone().into(),
+            amount: vec![Coin::new(bet.amount.0*2, state.native_coin)],
+        });
+
+        Response {
+            messages: vec![bank_send],
+            attributes: vec![
+                attr("action", "filp"),
+                attr("result", true),
+                attr("value", random),
+                attr("sender", info.sender.clone()),
+            ],
+            ..Response::default()
+        }
+    } else {
+        Response {
+            attributes: vec![
+                attr("action", "filp"),
+                attr("result", false),
+                attr("value", random),
+                attr("sender", info.sender),
+            ],
+            ..Response::default()
+        }
+    };
+
+    Ok(response)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
-    use cosmwasm_std::{coins, from_binary};
-
-    #[test]
-    fn proper_initialization() {
-        let mut deps = mock_dependencies(&[]);
-
-        let msg = InstantiateMsg { count: 17 };
-        let info = mock_info("creator", &coins(1000, "earth"));
-
-        // we can just call .unwrap() to assert this was a success
-        let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
-        assert_eq!(0, res.messages.len());
-
-        // it worked, let's query the state
-        let res = query(deps.as_ref(), mock_env(), QueryMsg::GetCount {}).unwrap();
-        let value: CountResponse = from_binary(&res).unwrap();
-        assert_eq!(17, value.count);
+pub fn try_withdraw(deps: DepsMut, info: MessageInfo, amount: Uint128) -> Result<Response, ContractError> {
+    let state = STATE.load(deps.storage)?;
+    if state.owner.ne(&info.sender) {
+        return Err(ContractError::Unauthorized {})
     }
 
-    #[test]
-    fn increment() {
-        let mut deps = mock_dependencies(&coins(2, "token"));
+    let bank_send = CosmosMsg::Bank(BankMsg::Send {
+        to_address: info.sender.into(),
+        amount: vec![Coin::new(amount.0, state.native_coin)],
+    });
 
-        let msg = InstantiateMsg { count: 17 };
-        let info = mock_info("creator", &coins(2, "token"));
-        let _res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
+    Ok(Response {
+        messages: vec![bank_send],
+        attributes: vec![
+            attr("action", "withdraw"),
+            attr("amount", amount),
+        ],
+        ..Response::default()
+    })
+}
 
-        // beneficiary can release it
-        let info = mock_info("anyone", &coins(2, "token"));
-        let msg = ExecuteMsg::Increment {};
-        let _res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
-
-        // should increase counter by 1
-        let res = query(deps.as_ref(), mock_env(), QueryMsg::GetCount {}).unwrap();
-        let value: CountResponse = from_binary(&res).unwrap();
-        assert_eq!(18, value.count);
-    }
-
-    #[test]
-    fn reset() {
-        let mut deps = mock_dependencies(&coins(2, "token"));
-
-        let msg = InstantiateMsg { count: 17 };
-        let info = mock_info("creator", &coins(2, "token"));
-        let _res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
-
-        // beneficiary can release it
-        let unauth_info = mock_info("anyone", &coins(2, "token"));
-        let msg = ExecuteMsg::Reset { count: 5 };
-        let res = execute(deps.as_mut(), mock_env(), unauth_info, msg);
-        match res {
-            Err(ContractError::Unauthorized {}) => {}
-            _ => panic!("Must return unauthorized error"),
-        }
-
-        // only the original creator can reset the counter
-        let auth_info = mock_info("creator", &coins(2, "token"));
-        let msg = ExecuteMsg::Reset { count: 5 };
-        let _res = execute(deps.as_mut(), mock_env(), auth_info, msg).unwrap();
-
-        // should now be 5
-        let res = query(deps.as_ref(), mock_env(), QueryMsg::GetCount {}).unwrap();
-        let value: CountResponse = from_binary(&res).unwrap();
-        assert_eq!(5, value.count);
-    }
+fn random(time: u64) -> u64 {
+    return time % 2;
 }
