@@ -57,7 +57,7 @@ pub fn try_flip(deps: DepsMut, env: Env, info: MessageInfo, value: bool) -> Resu
         Response {
             messages: vec![bank_send],
             attributes: vec![
-                attr("action", "filp"),
+                attr("action", "flip"),
                 attr("result", true),
                 attr("value", random),
                 attr("sender", info.sender.clone()),
@@ -67,7 +67,7 @@ pub fn try_flip(deps: DepsMut, env: Env, info: MessageInfo, value: bool) -> Resu
     } else {
         Response {
             attributes: vec![
-                attr("action", "filp"),
+                attr("action", "flip"),
                 attr("result", false),
                 attr("value", random),
                 attr("sender", info.sender),
